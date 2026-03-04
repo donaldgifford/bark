@@ -246,6 +246,12 @@ linters:
         text: "G104:"
         path: cmd/(compare|diff)\.go$
 
+      # pkg/types is the shared API contract package; "types" is intentional here.
+      - linters:
+          - revive
+        text: "avoid meaningless package names"
+        path: ^pkg/types/
+
     paths:
       - vendor
       - third_party

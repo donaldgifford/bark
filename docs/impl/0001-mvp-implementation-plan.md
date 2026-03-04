@@ -41,19 +41,19 @@ Implement the internal package distribution platform from initial project setup 
 
 Establish the repository structure, tooling, and conventions before any feature work begins.
 
-- [ ] Create monorepo with top-level directories: `cli/`, `api/`, `pipeline/`, `infra/`, `formulas/`, `docs/`
-- [ ] Initialize Go modules in `cli/` and `api/` with consistent Go version pinned in `.go-version`
-- [ ] Set up `docker-compose.yml` with LocalStack service
-- [ ] Write LocalStack init script that creates the `homebrew-bottles` bucket with versioning enabled
-- [ ] Write `Makefile` with targets: `infra-up`, `infra-down`, `infra-seed`, `api-dev`, `cli-build`, `test`, `lint`
-- [ ] Configure `.env.local.example` with all required environment variables documented
-- [ ] Set up `golangci-lint` with agreed linting rules for both modules
+- [x] Create monorepo with top-level directories: `cli/`, `api/`, `pipeline/`, `infra/`, `formulas/`, `docs/`
+- [x] Initialize Go modules in `cli/` and `api/` with consistent Go version pinned in `.go-version`
+- [x] Set up `docker-compose.yml` with LocalStack service
+- [x] Write LocalStack init script that creates the `homebrew-bottles` bucket with versioning enabled
+- [x] Write `Makefile` with targets: `infra-up`, `infra-down`, `infra-seed`, `api-dev`, `cli-build`, `test`, `lint`
+- [x] Configure `.env.local.example` with all required environment variables documented
+- [x] Set up `golangci-lint` with agreed linting rules for both modules
 - [ ] Set up pre-commit hooks: lint, format, no committed secrets
-- [ ] Create the package manifest schema as a Go struct in a shared `pkg/manifest` module and document it as the contract
-- [ ] Define S3 key structure: `bottles/{name}/{version}/{name}-{version}.arm64_sonoma.bottle.tar.gz`, `sboms/{name}/{version}/sbom.cdx.json`, `scans/{name}/{version}/grype.json`, `scans/{name}/{version}/scancode.json`
-- [ ] Define API request/response types in a shared `pkg/types` module
-- [ ] Document environment variable conventions in `docs/env-conventions.md`
-- [ ] Set up GitHub Actions CI: lint and test on PR, runs against LocalStack for integration tests
+- [x] Create the package manifest schema as a Go struct in a shared `pkg/manifest` module and document it as the contract
+- [x] Define S3 key structure: `bottles/{name}/{version}/{name}-{version}.arm64_sonoma.bottle.tar.gz`, `sboms/{name}/{version}/sbom.cdx.json`, `scans/{name}/{version}/grype.json`, `scans/{name}/{version}/scancode.json`
+- [x] Define API request/response types in a shared `pkg/types` module
+- [x] Document environment variable conventions in `docs/env-conventions.md`
+- [x] Set up GitHub Actions CI: lint and test on PR, runs against LocalStack for integration tests
 
 **Success Criteria:** Running `make infra-up` starts LocalStack and creates the S3 bucket. Running `make infra-down` tears it down cleanly. The manifest schema, S3 key structure, and API types are committed and reviewed by all contributors. The CI pipeline runs lint and tests on a hello-world Go file in each module.
 

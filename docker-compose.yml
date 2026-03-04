@@ -1,0 +1,16 @@
+---
+services:
+  localstack:
+    image: localstack/localstack:4.3
+    ports:
+      - "4566:4566"
+    environment:
+      SERVICES: s3
+      AWS_DEFAULT_REGION: us-east-1
+      LOCALSTACK_AUTH_TOKEN: ${LOCALSTACK_AUTH_TOKEN:-}
+    volumes:
+      - ./infra/scripts/init-localstack.sh:/etc/localstack/init/ready.d/init-localstack.sh
+      - localstack-data:/var/lib/localstack
+
+volumes:
+  localstack-data:
