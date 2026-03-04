@@ -61,21 +61,21 @@ Establish the repository structure, tooling, and conventions before any feature 
 
 The API is the authority for all package state. Build the data layer and core server structure before any endpoints.
 
-- [ ] Choose and configure database migration tool (goose or migrate)
-- [ ] Write initial migration: `packages` table (id, name, description, tier, created_at)
-- [ ] Write migration: `package_versions` table (id, package_id, version, bottle_s3_key, sbom_s3_key, sha256, cosign_sig_ref, tier, scan_status, approval_status, approved_by, approved_at, published_at, created_at)
-- [ ] Write migration: `scan_results` table (id, package_version_id, scanner, result_s3_key, passed, summary_json, scanned_at)
-- [ ] Write migration: `approval_records` table (id, package_version_id, action, actor, reason, created_at)
-- [ ] Write migration: `signing_keys` table (id, key_id, public_key, active, created_at, rotated_at)
-- [ ] Implement database connection pool with health check and graceful shutdown
-- [ ] Set up API server with graceful shutdown, request logging middleware, and request ID middleware
-- [ ] Implement health check endpoint `GET /healthz` returning 200 with db ping
-- [ ] Write JWT validation middleware that extracts and validates tokens against the OIDC provider's JWKS endpoint
-- [ ] Write middleware that attaches the caller identity to the request context
-- [ ] Write integration tests for middleware using real JWT fixtures
-- [ ] Set up structured logging (zerolog or slog) with consistent field conventions
-- [ ] Configure LocalStack-backed S3 client with path-style addressing and endpoint override from env
-- [ ] Write `S3Client` with methods: `PutObject`, `GetPresignedURL`, `ObjectExists`
+- [x] Choose and configure database migration tool (goose or migrate)
+- [x] Write initial migration: `packages` table (id, name, description, tier, created_at)
+- [x] Write migration: `package_versions` table (id, package_id, version, bottle_s3_key, sbom_s3_key, sha256, cosign_sig_ref, tier, scan_status, approval_status, approved_by, approved_at, published_at, created_at)
+- [x] Write migration: `scan_results` table (id, package_version_id, scanner, result_s3_key, passed, summary_json, scanned_at)
+- [x] Write migration: `approval_records` table (id, package_version_id, action, actor, reason, created_at)
+- [x] Write migration: `signing_keys` table (id, key_id, public_key, active, created_at, rotated_at)
+- [x] Implement database connection pool with health check and graceful shutdown
+- [x] Set up API server with graceful shutdown, request logging middleware, and request ID middleware
+- [x] Implement health check endpoint `GET /healthz` returning 200 with db ping
+- [x] Write JWT validation middleware that extracts and validates tokens against the OIDC provider's JWKS endpoint
+- [x] Write middleware that attaches the caller identity to the request context
+- [x] Write integration tests for middleware using real JWT fixtures
+- [x] Set up structured logging (zerolog or slog) with consistent field conventions
+- [x] Configure LocalStack-backed S3 client with path-style addressing and endpoint override from env
+- [x] Write `S3Client` with methods: `PutObject`, `GetPresignedURL`, `ObjectExists`
 - [ ] Write integration tests for `S3Client` against LocalStack
 
 **Success Criteria:** The API server starts, connects to the database, and serves the health check endpoint. JWT middleware correctly rejects requests with missing or invalid tokens. The S3 client can put and presign objects against LocalStack. All migrations run cleanly forward and rollback.
