@@ -264,6 +264,170 @@ func RegisterVersion(
 }
 
 // =============================================================================
+// Approval workflow queries
+// =============================================================================
+
+// ApproveVersion transitions a pending version to approved, sets published_at
+// to now, and inserts an approval record.
+func ApproveVersion(
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	name, version, actor, reason string,
+) error {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback(ctx) //nolint:errcheck // rollback on error path; original error takes precedence
+		}
+	}()
+
+	now := time.Now()
+
+	var versionID uuid.UUID
+
+	// Approve records the decision; published_at remains NULL until the
+	// post-approval pipeline signs and uploads the bottle (PublishVersion).
+	err = tx.QueryRow(ctx, `
+		UPDATE package_versions pv
+		SET approval_status = 'approved',
+		    approved_by     = $3,
+		    approved_at     = $4
+		FROM packages p
+		WHERE pv.package_id = p.id
+		  AND p.name = $1
+		  AND pv.version = $2
+		  AND pv.approval_status = 'pending'
+		RETURNING pv.id
+	`, name, version, actor, now).Scan(&versionID)
+	if err != nil {
+		return fmt.Errorf("approve version: %w", err)
+	}
+
+	if _, err = tx.Exec(ctx, `
+		INSERT INTO approval_records (package_version_id, action, actor, reason)
+		VALUES ($1, 'approved', $2, $3)
+	`, versionID, actor, reason); err != nil {
+		return fmt.Errorf("insert approval record: %w", err)
+	}
+
+	if err = tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit approve: %w", err)
+	}
+
+	return nil
+}
+
+// DenyVersion transitions a pending version to denied and inserts a denial record.
+func DenyVersion(
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	name, version, actor, reason string,
+) error {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback(ctx) //nolint:errcheck // rollback on error path; original error takes precedence
+		}
+	}()
+
+	var versionID uuid.UUID
+
+	err = tx.QueryRow(ctx, `
+		UPDATE package_versions pv
+		SET approval_status = 'denied'
+		FROM packages p
+		WHERE pv.package_id = p.id
+		  AND p.name = $1
+		  AND pv.version = $2
+		  AND pv.approval_status = 'pending'
+		RETURNING pv.id
+	`, name, version).Scan(&versionID)
+	if err != nil {
+		return fmt.Errorf("deny version: %w", err)
+	}
+
+	if _, err = tx.Exec(ctx, `
+		INSERT INTO approval_records (package_version_id, action, actor, reason)
+		VALUES ($1, 'denied', $2, $3)
+	`, versionID, actor, reason); err != nil {
+		return fmt.Errorf("insert denial record: %w", err)
+	}
+
+	if err = tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit deny: %w", err)
+	}
+
+	return nil
+}
+
+// PublishVersion updates the bottle_s3_key, cosign_sig_ref, and published_at
+// fields for a version that has already been approved. Called by the
+// post-approval pipeline after the bottle has been signed and uploaded.
+func PublishVersion(
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	name, version, bottleS3Key, cosignSigRef string,
+) error {
+	tag, err := pool.Exec(ctx, `
+		UPDATE package_versions pv
+		SET bottle_s3_key  = $3,
+		    cosign_sig_ref = $4,
+		    published_at   = NOW()
+		FROM packages p
+		WHERE pv.package_id = p.id
+		  AND p.name = $1
+		  AND pv.version = $2
+		  AND pv.approval_status = 'approved'
+		  AND pv.published_at IS NULL
+	`, name, version, bottleS3Key, cosignSigRef)
+	if err != nil {
+		return fmt.Errorf("publish version: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("publish version: %w", pgx.ErrNoRows)
+	}
+	return nil
+}
+
+// ListPendingVersions returns all package versions with approval_status = 'pending',
+// ordered oldest first.
+func ListPendingVersions(ctx context.Context, pool *pgxpool.Pool) ([]PackageVersion, error) {
+	rows, err := pool.Query(ctx, `
+		SELECT pv.id, pv.package_id, p.name, pv.version,
+		       pv.bottle_s3_key, pv.sbom_s3_key, pv.sha256, pv.cosign_sig_ref,
+		       pv.tier, pv.scan_status, pv.approval_status,
+		       pv.approved_by, pv.approved_at, pv.published_at, pv.created_at
+		FROM package_versions pv
+		JOIN packages p ON p.id = pv.package_id
+		WHERE pv.approval_status = 'pending'
+		ORDER BY pv.created_at ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("list pending versions: %w", err)
+	}
+
+	defer rows.Close()
+
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (PackageVersion, error) {
+		var pv PackageVersion
+		return pv, row.Scan(
+			&pv.ID, &pv.PackageID, &pv.PackageName, &pv.Version,
+			&pv.BottleS3Key, &pv.SBOMS3Key, &pv.SHA256, &pv.CosignSigRef,
+			&pv.Tier, &pv.ScanStatus, &pv.ApprovalStatus,
+			&pv.ApprovedBy, &pv.ApprovedAt, &pv.PublishedAt, &pv.CreatedAt,
+		)
+	})
+}
+
+// =============================================================================
 // Signing key queries
 // =============================================================================
 

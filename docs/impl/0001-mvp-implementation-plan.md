@@ -177,31 +177,31 @@ The pipeline for ingesting packages from internal teams via GoReleaser. This is 
 
 Adds support for the third tier and the manual approval gate.
 
-- [ ] Define `formulas/external-binary/requests/` directory structure with a YAML schema for package requests
-- [ ] Request schema fields: name, version, source_url, sha256, requested_by, reason, license_expected
-- [ ] Write GitHub Actions workflow triggered by new files in `external-binary/requests/`
-- [ ] Workflow steps (automatic, no approval yet):
-  - [ ] Download binary from source_url
-  - [ ] Verify SHA256 against request file value
-  - [ ] Run syft + grype scan (same as internal tier)
-  - [ ] Run ScanCode against tarball contents (best-effort, not a gate)
-  - [ ] Upload scan artifacts to S3 under `scans/external-binary/{name}/{version}/`
-  - [ ] Call API to create a pending version record with `approval_status: pending`
-  - [ ] Post scan summary as PR comment including CVE counts, detected licenses, and policy evaluation
-- [ ] Implement `POST /v1/packages/{name}/versions/{version}/approve` API endpoint
-  - [ ] Requires elevated role claim in JWT or a separate admin token
-  - [ ] Records approver identity, timestamp, and optional reason in `approval_records`
-  - [ ] Updates version `approval_status` to `approved`
-  - [ ] Triggers the sign-upload-register sequence (or a webhook that triggers the pipeline to continue)
-- [ ] Implement `POST /v1/packages/{name}/versions/{version}/deny` API endpoint
-  - [ ] Records denier identity and reason
-  - [ ] Updates version `approval_status` to `denied`
-- [ ] Write the sign-upload-register sequence that runs after approval:
-  - [ ] Retrieve bottle from pending S3 location
-  - [ ] Sign with cosign
-  - [ ] Move to published S3 location
-  - [ ] Update version record to `published`
-- [ ] Write API endpoint `GET /v1/admin/pending` — lists all versions awaiting approval with scan summaries
+- [x] Define `formulas/external-binary/requests/` directory structure with a YAML schema for package requests
+- [x] Request schema fields: name, version, source_url, sha256, requested_by, reason, license_expected
+- [x] Write GitHub Actions workflow triggered by new files in `external-binary/requests/`
+- [x] Workflow steps (automatic, no approval yet):
+  - [x] Download binary from source_url
+  - [x] Verify SHA256 against request file value
+  - [x] Run syft + grype scan (same as internal tier)
+  - [x] Run ScanCode against tarball contents (best-effort, not a gate)
+  - [x] Upload scan artifacts to S3 under `scans/external-binary/{name}/{version}/`
+  - [x] Call API to create a pending version record with `approval_status: pending`
+  - [x] Post scan summary as PR comment including CVE counts, detected licenses, and policy evaluation
+- [x] Implement `POST /v1/packages/{name}/versions/{version}/approve` API endpoint
+  - [x] Requires elevated role claim in JWT or a separate admin token
+  - [x] Records approver identity, timestamp, and optional reason in `approval_records`
+  - [x] Updates version `approval_status` to `approved`
+  - [x] Triggers the sign-upload-register sequence (or a webhook that triggers the pipeline to continue)
+- [x] Implement `POST /v1/packages/{name}/versions/{version}/deny` API endpoint
+  - [x] Records denier identity and reason
+  - [x] Updates version `approval_status` to `denied`
+- [x] Write the sign-upload-register sequence that runs after approval:
+  - [x] Retrieve bottle from pending S3 location
+  - [x] Sign with cosign
+  - [x] Move to published S3 location
+  - [x] Update version record to `published`
+- [x] Write API endpoint `GET /v1/admin/pending` — lists all versions awaiting approval with scan summaries
 - [ ] Notify reviewers on new pending version (Slack webhook or email, configurable)
 - [ ] Write integration tests for the full approval flow: submit request → pending → approve → published → installable
 

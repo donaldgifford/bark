@@ -114,6 +114,15 @@ type ListPendingResponse struct {
 	Total   int              `json:"total"`
 }
 
+// PublishVersionRequest is the request body for
+// POST /v1/packages/{name}/versions/{version}/publish.
+// Sent by the post-approval pipeline after the bottle has been signed and
+// uploaded to its final S3 location.
+type PublishVersionRequest struct {
+	BottleS3Key  string `json:"bottle_s3_key"`
+	CosignSigRef string `json:"cosign_sig_ref"`
+}
+
 // =============================================================================
 // Signing keys
 // =============================================================================

@@ -1,0 +1,10 @@
+# Example external-binary package request.
+# Copy this file to {name}-{version}.yaml and fill in the fields.
+
+name: example-tool
+version: "2.1.0"
+source_url: "https://github.com/example/example-tool/releases/download/v2.1.0/example-tool-darwin-arm64.tar.gz"
+sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+requested_by: "your-github-handle"
+reason: "Used by the infrastructure team for XYZ automation. No internal equivalent available."
+license_expected: "MIT"

@@ -1,0 +1,264 @@
+---
+# External-Binary Tier Pipeline
+#
+# Triggered by PRs that add new files to formulas/external-binary/requests/.
+# For each new request YAML the workflow:
+#   1. Downloads the binary from source_url
+#   2. Verifies SHA-256
+#   3. Generates an SBOM (syft) and scans for CVEs (grype)
+#   4. Runs license detection (scancode) — non-blocking
+#   5. Creates a pending version record via the bark API
+#   6. Posts a scan summary as a PR comment
+#
+# The package is NOT installable until an admin approves it via the bark API:
+#   POST /v1/packages/{name}/versions/{version}/approve
+#
+# Required repository secrets (same as internal-pipeline):
+#   BARK_API_BASE_URL, BARK_API_TOKEN, BARK_S3_BUCKET,
+#   BARK_S3_ENDPOINT, BARK_S3_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
+
+name: External-Binary Pipeline
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+    branches: [main]
+    paths:
+      - formulas/external-binary/requests/*.yaml
+      - formulas/external-binary/requests/*.yml
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  scan:
+    name: Scan External Binary Requests
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install scan tools
+        run: |
+          brew install syft grype
+          pip3 install scancode-toolkit
+
+      - name: Detect new request files
+        id: changes
+        run: |
+          FILES=$(git diff --name-only --diff-filter=A origin/${{ github.base_ref }}...HEAD \
+            -- 'formulas/external-binary/requests/*.yaml' \
+               'formulas/external-binary/requests/*.yml' | tr '\n' ' ')
+          echo "files=${FILES}" >> "$GITHUB_OUTPUT"
+
+      - name: Process requests
+        if: steps.changes.outputs.files != ''
+        id: process
+        env:
+          BARK_API_BASE_URL: ${{ secrets.BARK_API_BASE_URL }}
+          BARK_API_TOKEN: ${{ secrets.BARK_API_TOKEN }}
+          BARK_S3_BUCKET: ${{ secrets.BARK_S3_BUCKET }}
+          BARK_S3_ENDPOINT: ${{ secrets.BARK_S3_ENDPOINT }}
+          BARK_S3_REGION: ${{ secrets.BARK_S3_REGION }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          mkdir -p scan-results
+
+          for req_file in ${{ steps.changes.outputs.files }}; do
+            echo "==> Processing ${req_file}"
+
+            # Parse request fields from YAML.
+            NAME=$(grep '^name:' "${req_file}" | awk '{print $2}')
+            VERSION=$(grep '^version:' "${req_file}" | sed "s/version: *['\"]\\?//;s/['\"]//g")
+            SOURCE_URL=$(grep '^source_url:' "${req_file}" | sed "s/source_url: *['\"]\\?//;s/['\"]//g")
+            EXPECTED_SHA256=$(grep '^sha256:' "${req_file}" | sed "s/sha256: *['\"]\\?//;s/['\"]//g")
+            REQUESTED_BY=$(grep '^requested_by:' "${req_file}" | sed "s/requested_by: *['\"]\\?//;s/['\"]//g")
+
+            if [ -z "${NAME}" ] || [ -z "${VERSION}" ] || [ -z "${SOURCE_URL}" ]; then
+              echo "::error::Cannot parse required fields from ${req_file}"
+              continue
+            fi
+
+            BOTTLE_PATH="/tmp/${NAME}-${VERSION}.tar.gz"
+            WORK_DIR="/tmp/${NAME}-${VERSION}-work"
+            mkdir -p "${WORK_DIR}"
+
+            # 1. Download binary.
+            echo "Downloading ${SOURCE_URL}"
+            if ! curl -fsSL -o "${BOTTLE_PATH}" "${SOURCE_URL}"; then
+              echo "::error::Failed to download ${SOURCE_URL}"
+              continue
+            fi
+
+            # 2. Verify SHA-256.
+            ACTUAL_SHA256=$(shasum -a 256 "${BOTTLE_PATH}" | awk '{print $1}')
+            if [ "${ACTUAL_SHA256}" != "${EXPECTED_SHA256}" ]; then
+              echo "::error::SHA-256 mismatch for ${NAME}@${VERSION}"
+              echo "  expected: ${EXPECTED_SHA256}"
+              echo "  got:      ${ACTUAL_SHA256}"
+              cat > "scan-results/${NAME}-${VERSION}.json" <<JSON
+          {"success":false,"errors":["SHA-256 mismatch: expected ${EXPECTED_SHA256}, got ${ACTUAL_SHA256}"],"scans":[]}
+          JSON
+              continue
+            fi
+
+            # 3. Generate SBOM.
+            SBOM_PATH="${WORK_DIR}/sbom.cdx.json"
+            syft packages "${BOTTLE_PATH}" -o "cyclonedx-json=${SBOM_PATH}" || true
+
+            # 4. Run CVE scan.
+            GRYPE_PATH="${WORK_DIR}/grype.json"
+            grype "sbom:${SBOM_PATH}" -o json --file "${GRYPE_PATH}" || true
+
+            # Count criticals.
+            CRITICAL_COUNT=0
+            HIGH_COUNT=0
+            if [ -f "${GRYPE_PATH}" ]; then
+              CRITICAL_COUNT=$(jq '[.matches[].vulnerability.severity | select(. == "Critical")] | length' "${GRYPE_PATH}" 2>/dev/null || echo 0)
+              HIGH_COUNT=$(jq '[.matches[].vulnerability.severity | select(. == "High")] | length' "${GRYPE_PATH}" 2>/dev/null || echo 0)
+            fi
+
+            # 5. Run license scan (non-blocking).
+            SCANCODE_PATH="${WORK_DIR}/scancode.json"
+            mkdir -p "${WORK_DIR}/extracted"
+            tar -xzf "${BOTTLE_PATH}" -C "${WORK_DIR}/extracted" 2>/dev/null || true
+            scancode --license --json-pp "${SCANCODE_PATH}" "${WORK_DIR}/extracted" 2>/dev/null || true
+
+            # 6. Upload bottle to staging S3 (held pending admin approval).
+            STAGING_KEY="bottles/external-binary/${NAME}/${VERSION}/staging/${NAME}-${VERSION}.tar.gz"
+            aws s3 cp "${BOTTLE_PATH}" "s3://${BARK_S3_BUCKET}/${STAGING_KEY}" \
+              ${BARK_S3_ENDPOINT:+--endpoint-url "${BARK_S3_ENDPOINT}"}
+
+            # 7. Upload scan artifacts to S3.
+            SCAN_S3_PREFIX="scans/external-binary/${NAME}/${VERSION}"
+            for artifact in "${GRYPE_PATH}" "${SCANCODE_PATH}" "${SBOM_PATH}"; do
+              if [ -f "${artifact}" ]; then
+                KEY="${SCAN_S3_PREFIX}/$(basename "${artifact}")"
+                aws s3 cp "${artifact}" "s3://${BARK_S3_BUCKET}/${KEY}" \
+                  ${BARK_S3_ENDPOINT:+--endpoint-url "${BARK_S3_ENDPOINT}"} || true
+              fi
+            done
+
+            # 8. Register pending version with the bark API.
+            REGISTER_PAYLOAD=$(cat <<PAYLOAD
+          {
+            "version": "${VERSION}",
+            "bottle_s3_key": "${STAGING_KEY}",
+            "sha256": "${ACTUAL_SHA256}",
+            "cosign_sig_ref": "",
+            "sbom_s3_key": "${SCAN_S3_PREFIX}/sbom.cdx.json",
+            "scan_results": [
+              {"scanner": "grype", "result_s3_key": "${SCAN_S3_PREFIX}/grype.json", "passed": $([ "${CRITICAL_COUNT}" = "0" ] && echo true || echo false)},
+              {"scanner": "scancode", "result_s3_key": "${SCAN_S3_PREFIX}/scancode.json", "passed": true}
+            ],
+            "tier": "external-binary"
+          }
+          PAYLOAD
+          )
+            REGISTER_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              -X POST "${BARK_API_BASE_URL}/v1/packages/${NAME}/versions" \
+              -H "Authorization: Bearer ${BARK_API_TOKEN}" \
+              -H "Content-Type: application/json" \
+              -d "${REGISTER_PAYLOAD}")
+
+            cat > "scan-results/${NAME}-${VERSION}.json" <<JSON
+          {
+            "success": true,
+            "name": "${NAME}",
+            "version": "${VERSION}",
+            "requested_by": "${REQUESTED_BY}",
+            "critical_cves": ${CRITICAL_COUNT},
+            "high_cves": ${HIGH_COUNT},
+            "register_status": "${REGISTER_STATUS}",
+            "scans": [
+              {"scanner": "grype", "passed": $([ "${CRITICAL_COUNT}" = "0" ] && echo true || echo false), "details": "critical=${CRITICAL_COUNT} high=${HIGH_COUNT}"},
+              {"scanner": "scancode", "passed": true, "details": "see S3 for license details"}
+            ]
+          }
+          JSON
+          done
+
+      - name: Post PR comment
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const resultsDir = 'scan-results';
+
+            let body = '## Bark External-Binary Pipeline\n\n';
+            body += '> ⚠️ This package requires **manual approval** before it can be installed.\n\n';
+
+            if (!fs.existsSync(resultsDir) || fs.readdirSync(resultsDir).length === 0) {
+              body += '_No new package requests found in this PR._\n';
+            } else {
+              for (const file of fs.readdirSync(resultsDir).filter(f => f.endsWith('.json'))) {
+                const result = JSON.parse(fs.readFileSync(path.join(resultsDir, file)));
+                const label = file.replace('.json', '');
+
+                if (!result.success) {
+                  body += `### ❌ ${label}\n`;
+                  for (const e of result.errors || []) body += `- ❌ ${e}\n`;
+                  body += '\n';
+                  continue;
+                }
+
+                const icon = result.critical_cves === 0 ? '⚠️' : '❌';
+                body += `### ${icon} ${label}\n`;
+                body += `- **Requested by:** ${result.requested_by}\n`;
+                body += `- **CVEs:** critical=${result.critical_cves} high=${result.high_cves}\n`;
+
+                for (const scan of result.scans || []) {
+                  const si = scan.passed ? '✅' : '❌';
+                  body += `- ${si} **${scan.scanner}:** ${scan.details}\n`;
+                }
+
+                body += `\n**Status:** Pending admin approval via \`POST /v1/packages/${result.name}/versions/${result.version}/approve\`\n\n`;
+              }
+            }
+
+            body += '\n---\n_Generated by the External-Binary Pipeline workflow._';
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const existing = comments.find(c => c.body.includes('Bark External-Binary Pipeline'));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+      - name: Upload scan results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scan-results
+          path: scan-results/
+          retention-days: 90

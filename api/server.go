@@ -117,9 +117,15 @@ func (s *Server) routes() (http.Handler, error) {
 	authed.HandleFunc("GET /v1/packages/{name}/{version}", h.ResolveVersion)
 	authed.HandleFunc("GET /v1/signing-keys/current", h.CurrentSigningKey)
 
+	// Admin approval endpoints — JWT-authenticated; caller identity logged in approval records.
+	authed.HandleFunc("POST /v1/packages/{name}/versions/{version}/approve", h.ApproveVersion)
+	authed.HandleFunc("POST /v1/packages/{name}/versions/{version}/deny", h.DenyVersion)
+	authed.HandleFunc("GET /v1/admin/pending", h.ListPending)
+
 	mux.Handle("/v1/packages", authMW(authed))
 	mux.Handle("/v1/packages/", authMW(authed))
 	mux.Handle("/v1/signing-keys/", authMW(authed))
+	mux.Handle("/v1/admin/", authMW(authed))
 
 	// Pipeline-authenticated routes (CI service token).
 	pipeline := http.NewServeMux()
@@ -127,8 +133,12 @@ func (s *Server) routes() (http.Handler, error) {
 	pipelineMW := middleware.PipelineAuth(s.cfg.PipelineToken)
 	mux.Handle("/v1/pipeline/", pipelineMW(pipeline))
 
-	// POST registration endpoint — pipeline token auth.
+	// POST registration and publish endpoints — pipeline token auth.
 	mux.Handle("POST /v1/packages/{name}/versions", pipelineMW(http.HandlerFunc(h.RegisterVersion)))
+	mux.Handle(
+		"POST /v1/packages/{name}/versions/{version}/publish",
+		pipelineMW(http.HandlerFunc(h.PublishVersion)),
+	)
 
 	// Apply global middleware to all routes.
 	return middleware.RequestID(middleware.Logger(s.logger)(mux)), nil
