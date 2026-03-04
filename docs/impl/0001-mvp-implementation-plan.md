@@ -120,27 +120,27 @@ cosign integration for both the pipeline (signing) and the CLI (verification). M
 
 The minimum CLI for a developer to authenticate and install a package.
 
-- [ ] Set up Cobra CLI structure with root command and persistent flags: `--api-url`, `--log-level`
-- [ ] Implement `pkgtool auth login` — OIDC device flow, opens browser, waits for callback, stores token in macOS keychain under a namespaced service name
-- [ ] Implement `pkgtool auth status` — prints current identity and token expiry
-- [ ] Implement `pkgtool auth logout` — removes token from keychain
-- [ ] Write token refresh logic: check expiry before each API call, refresh if within 5 minutes of expiry, prompt re-login if refresh fails
-- [ ] Implement content-addressable store at `~/.pkgtool/store/{sha256}/`
-- [ ] Store has methods: `Has(sha256 string) bool`, `Put(sha256 string, bottlePath string) error`, `Get(sha256 string) (path string, error)`
+- [x] Set up Cobra CLI structure with root command and persistent flags: `--api-url`, `--log-level`
+- [x] Implement `pkgtool auth login` — OIDC device flow, opens browser, waits for callback, stores token in macOS keychain under a namespaced service name
+- [x] Implement `pkgtool auth status` — prints current identity and token expiry
+- [x] Implement `pkgtool auth logout` — removes token from keychain
+- [x] Write token refresh logic: check expiry before each API call, refresh if within 5 minutes of expiry, prompt re-login if refresh fails
+- [x] Implement content-addressable store at `~/.pkgtool/store/{sha256}.tar.gz`
+- [x] Store has methods: `Has(sha256 string) bool`, `Put(sha256 string, bottlePath string) error`, `Get(sha256 string) (path string, error)`
 - [ ] APFS clonefile support with fallback to regular copy when not available
-- [ ] Implement `pkgtool install <package>` command:
-  - [ ] Authenticate and get token
-  - [ ] Call resolve endpoint, receive manifest
-  - [ ] Verify cosign signature
-  - [ ] Check local store for SHA256 cache hit
-  - [ ] On cache miss: download bottle from presigned URL, verify SHA256, store in content-addressable store
-  - [ ] Extract bottle tarball to prefix `~/.pkgtool/prefix/Cellar/{name}/{version}/`
-  - [ ] Symlink binaries into `~/.pkgtool/prefix/bin/`
-  - [ ] Print clean status output with each step
-- [ ] Implement `pkgtool uninstall <package>` — removes symlinks and Cellar directory, does not remove store entry
-- [ ] Implement `pkgtool list` — shows installed packages and versions
-- [ ] Implement `pkgtool search <query>` — calls search endpoint, prints results
-- [ ] Print user-friendly error messages for: auth failure, package not found, signature verification failure, download failure, checksum mismatch
+- [x] Implement `pkgtool install <package>` command:
+  - [x] Authenticate and get token
+  - [x] Call resolve endpoint, receive manifest
+  - [x] Verify cosign signature
+  - [x] Check local store for SHA256 cache hit
+  - [x] On cache miss: download bottle from presigned URL, verify SHA256, store in content-addressable store
+  - [x] Extract bottle tarball to prefix `~/.pkgtool/prefix/Cellar/{name}/{version}/`
+  - [x] Symlink binaries into `~/.pkgtool/prefix/bin/`
+  - [x] Print clean status output with each step
+- [x] Implement `pkgtool uninstall <package>` — removes symlinks and Cellar directory, does not remove store entry
+- [x] Implement `pkgtool list` — shows installed packages and versions
+- [x] Implement `pkgtool search <query>` — calls search endpoint, prints results
+- [x] Print user-friendly error messages for: auth failure, package not found, signature verification failure, download failure, checksum mismatch
 - [ ] Write integration tests for install flow against a locally seeded API and LocalStack
 
 **Success Criteria:** A developer can run `pkgtool auth login`, complete the OIDC flow, run `pkgtool install <package>` for a seeded package, and find the binary available on their PATH. Running install again uses the cache and skips the download. Signature verification failure prevents installation.
