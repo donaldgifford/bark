@@ -1,0 +1,197 @@
+---
+# Internal Tier Pipeline
+#
+# Triggered by PRs that touch formulas/internal/. For each changed formula,
+# this workflow downloads and validates the referenced bottle: generates an
+# SBOM, scans for CVEs (grype), checks licenses (scancode), signs the bottle
+# with cosign, uploads artifacts to S3, and registers the version with the
+# bark API.
+#
+# Required repository secrets:
+#   BARK_API_BASE_URL       - Base URL of the bark API
+#   BARK_API_TOKEN          - Pipeline bearer token (pipelineToken)
+#   BARK_S3_BUCKET          - S3 bucket name (e.g. homebrew-bottles)
+#   BARK_S3_ENDPOINT        - S3 endpoint (empty for AWS; set for LocalStack)
+#   BARK_S3_REGION          - AWS region (e.g. us-east-1)
+#   BARK_COSIGN_KEY         - PEM-encoded cosign private key (ENCRYPTED SIGSTORE PRIVATE KEY)
+#   AWS_ACCESS_KEY_ID       - AWS / LocalStack access key
+#   AWS_SECRET_ACCESS_KEY   - AWS / LocalStack secret key
+
+name: Internal Pipeline
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+    branches: [main]
+    paths:
+      - formulas/internal/**
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  ingest:
+    name: Ingest Internal Bottles
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install syft
+        run: brew install syft
+
+      - name: Install grype
+        run: brew install grype
+
+      - name: Install scancode-toolkit
+        run: pip3 install scancode-toolkit
+
+      - name: Install cosign
+        run: brew install cosign
+
+      - name: Build ingest CLI
+        run: go build -o build/bin/bark-ingest ./cmd/bark-ingest
+
+      - name: Write cosign key
+        run: |
+          echo "${{ secrets.BARK_COSIGN_KEY }}" > /tmp/cosign.key
+          chmod 0600 /tmp/cosign.key
+
+      - name: Detect changed formulas
+        id: changes
+        run: |
+          FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD \
+            -- 'formulas/internal/*.yaml' 'formulas/internal/*.yml' | tr '\n' ' ')
+          echo "files=${FILES}" >> "$GITHUB_OUTPUT"
+
+      - name: Run ingest pipeline
+        if: steps.changes.outputs.files != ''
+        env:
+          BARK_API_BASE_URL: ${{ secrets.BARK_API_BASE_URL }}
+          BARK_API_TOKEN: ${{ secrets.BARK_API_TOKEN }}
+          BARK_S3_BUCKET: ${{ secrets.BARK_S3_BUCKET }}
+          BARK_S3_ENDPOINT: ${{ secrets.BARK_S3_ENDPOINT }}
+          BARK_S3_REGION: ${{ secrets.BARK_S3_REGION }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        run: |
+          mkdir -p pipeline-results
+
+          for formula in ${{ steps.changes.outputs.files }}; do
+            echo "==> Processing ${formula}"
+
+            # Extract name and version from the formula YAML.
+            NAME=$(grep '^name:' "${formula}" | awk '{print $2}')
+            VERSION=$(grep '^version:' "${formula}" | awk '{print $2}')
+            BOTTLE_URL=$(grep 'bottle_url:' "${formula}" | awk '{print $2}')
+
+            if [ -z "${NAME}" ] || [ -z "${VERSION}" ] || [ -z "${BOTTLE_URL}" ]; then
+              echo "::warning::Cannot parse ${formula}; skipping"
+              continue
+            fi
+
+            BOTTLE_PATH="/tmp/${NAME}-${VERSION}.tar.gz"
+
+            # Download the bottle.
+            curl -fsSL -o "${BOTTLE_PATH}" "${BOTTLE_URL}"
+
+            # Run the ingest pipeline and write JSON result.
+            ./build/bin/bark-ingest \
+              --api-url "${BARK_API_BASE_URL}" \
+              --api-token "${BARK_API_TOKEN}" \
+              --s3-bucket "${BARK_S3_BUCKET}" \
+              --s3-endpoint "${BARK_S3_ENDPOINT}" \
+              --s3-region "${BARK_S3_REGION}" \
+              --signing-key /tmp/cosign.key \
+              --policy pipeline/policy/license-policy.yaml \
+              --bottle "${BOTTLE_PATH}" \
+              --name "${NAME}" \
+              --version "${VERSION}" \
+              --output "pipeline-results/${NAME}-${VERSION}.json" || true
+          done
+
+      - name: Post PR comment
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const resultsDir = 'pipeline-results';
+
+            let body = '## Bark Internal Pipeline\n\n';
+
+            if (!fs.existsSync(resultsDir) || fs.readdirSync(resultsDir).length === 0) {
+              body += '_No bottles were processed in this PR._\n';
+            } else {
+              for (const file of fs.readdirSync(resultsDir).filter(f => f.endsWith('.json'))) {
+                const result = JSON.parse(fs.readFileSync(path.join(resultsDir, file)));
+                const label = file.replace('.json', '');
+                const icon = result.success ? '✅' : '❌';
+
+                body += `### ${icon} ${label}\n`;
+
+                if (result.registrationID) {
+                  body += `- **Registration ID:** ${result.registrationID}\n`;
+                }
+
+                for (const scan of result.scans || []) {
+                  const si = scan.passed ? '✅' : '❌';
+                  body += `- ${si} **${scan.scanner}:** ${scan.details}\n`;
+                }
+
+                for (const w of result.warnings || []) {
+                  body += `- ⚠️ ${w}\n`;
+                }
+
+                for (const e of result.errors || []) {
+                  body += `- ❌ ${e}\n`;
+                }
+
+                body += '\n';
+              }
+            }
+
+            body += '\n---\n_Generated by the Internal Pipeline workflow._';
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const existing = comments.find(c => c.body.includes('Bark Internal Pipeline'));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
+
+      - name: Upload pipeline results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pipeline-results
+          path: pipeline-results/
+          retention-days: 30

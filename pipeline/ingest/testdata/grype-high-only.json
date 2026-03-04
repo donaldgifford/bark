@@ -1,0 +1,6 @@
+{
+  "matches": [
+    {"vulnerability": {"id": "CVE-2024-0010", "severity": "High"}},
+    {"vulnerability": {"id": "CVE-2024-0011", "severity": "Medium"}}
+  ]
+}

@@ -149,27 +149,27 @@ The minimum CLI for a developer to authenticate and install a package.
 
 The pipeline for ingesting packages from internal teams via GoReleaser. This is the first real end-to-end flow.
 
-- [ ] Write `pipeline/ingest` package that accepts a bottle tarball path and registers it with the API
-- [ ] Write a GitHub Actions workflow triggered by new formula PRs to the internal tap repo
-- [ ] Workflow steps:
-  - [ ] Detect new or updated formula in PR
-  - [ ] Download the bottle archive referenced in the formula
-  - [ ] Verify the bottle URL is from an allowed internal origin (configurable allowlist)
-  - [ ] Generate SBOM from bottle: `syft packages <bottle> -o cyclonedx-json=sbom.cdx.json`
-  - [ ] Run vulnerability scan against SBOM: `grype sbom:sbom.cdx.json -o json --file grype-result.json`
-  - [ ] Evaluate grype result against policy thresholds: fail pipeline if critical CVEs found
-  - [ ] Run ScanCode license check against the tarball contents
-  - [ ] Evaluate license results against `pipeline/policy/license-policy.yaml`
-  - [ ] Upload bottle to S3: `bottles/internal/{name}/{version}/...`
-  - [ ] Upload SBOM to S3: `sboms/{name}/{version}/sbom.cdx.json`
-  - [ ] Upload raw grype result to S3: `scans/{name}/{version}/grype.json`
-  - [ ] Upload raw ScanCode result to S3: `scans/{name}/{version}/scancode.json`
-  - [ ] Sign bottle with cosign using private key from secrets manager
-  - [ ] Call API registration endpoint with all metadata
-  - [ ] Post pipeline result as PR comment (pass/fail with scan summary)
-- [ ] Write `pipeline/policy/license-policy.yaml` with initial allow/warn/deny lists
-- [ ] Write license policy evaluator that reads the YAML and evaluates ScanCode output against it
-- [ ] Write pipeline tests with fixture bottles and mocked scanner output
+- [x] Write `pipeline/ingest` package that accepts a bottle tarball path and registers it with the API
+- [x] Write a GitHub Actions workflow triggered by new formula PRs to the internal tap repo
+- [x] Workflow steps:
+  - [x] Detect new or updated formula in PR
+  - [x] Download the bottle archive referenced in the formula
+  - [x] Verify the bottle URL is from an allowed internal origin (configurable allowlist)
+  - [x] Generate SBOM from bottle: `syft packages <bottle> -o cyclonedx-json=sbom.cdx.json`
+  - [x] Run vulnerability scan against SBOM: `grype sbom:sbom.cdx.json -o json --file grype-result.json`
+  - [x] Evaluate grype result against policy thresholds: fail pipeline if critical CVEs found
+  - [x] Run ScanCode license check against the tarball contents
+  - [x] Evaluate license results against `pipeline/policy/license-policy.yaml`
+  - [x] Upload bottle to S3: `bottles/internal/{name}/{version}/...`
+  - [x] Upload SBOM to S3: `sboms/{name}/{version}/sbom.cdx.json`
+  - [x] Upload raw grype result to S3: `scans/{name}/{version}/grype.json`
+  - [x] Upload raw ScanCode result to S3: `scans/{name}/{version}/scancode.json`
+  - [x] Sign bottle with cosign using private key from secrets manager
+  - [x] Call API registration endpoint with all metadata
+  - [x] Post pipeline result as PR comment (pass/fail with scan summary)
+- [x] Write `pipeline/policy/license-policy.yaml` with initial allow/warn/deny lists
+- [x] Write license policy evaluator that reads the YAML and evaluates ScanCode output against it
+- [x] Write pipeline tests with fixture bottles and mocked scanner output
 
 **Success Criteria:** A GoReleaser-produced bottle submitted via a PR to the tap repo goes through the pipeline automatically. On pass, it is signed, uploaded to S3, and registered with the API. On scan failure, the PR is blocked with a clear summary. A developer can install the package using the CLI immediately after the pipeline succeeds.
 
