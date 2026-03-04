@@ -101,18 +101,18 @@ The minimum endpoints the CLI needs to function.
 
 cosign integration for both the pipeline (signing) and the CLI (verification). Must be in place before any real packages are distributed.
 
-- [ ] Generate cosign key pair for development: `cosign generate-key-pair`
-- [ ] Document the production key generation process: generate on a secured machine, store private key in secrets manager, never commit
-- [ ] Store development public key in `infra/keys/cosign-dev.pub` — safe to commit
-- [ ] Write `pipeline/signing` package: `SignBottle(bottlePath, keyPath string) (sigB64 string, error)` using cosign SDK
-- [ ] Write `pipeline/signing` package: `SignSBOM` — same pattern
-- [ ] The sig reference stored in the API is the base64-encoded detached signature, not a Rekor entry for internal key signing
-- [ ] Write `cli/internal/verifier` package: `Verify(bottlePath string, sigB64 string, publicKey string) error`
-- [ ] Verifier fetches public key from keychain cache or calls `GET /v1/signing-keys/current` and caches the result
-- [ ] Verifier fails closed: any error in verification aborts the install
-- [ ] Write tests for signing and verification round-trip with a real bottle tarball fixture
-- [ ] Write test that confirms verification fails with a tampered bottle
-- [ ] Write test that confirms verification fails with a signature from a different key
+- [x] Generate cosign key pair for development: `cosign generate-key-pair`
+- [x] Document the production key generation process: generate on a secured machine, store private key in secrets manager, never commit
+- [x] Store development public key in `infra/keys/cosign-dev.pub` — safe to commit
+- [x] Write `pipeline/signing` package: `SignBottle(bottlePath, keyPath string) (sigB64 string, error)` using cosign SDK
+- [x] Write `pipeline/signing` package: `SignSBOM` — same pattern
+- [x] The sig reference stored in the API is the base64-encoded detached signature, not a Rekor entry for internal key signing
+- [x] Write `cli/internal/verifier` package: `Verify(bottlePath string, sigB64 string, publicKey string) error`
+- [x] Verifier fetches public key from keychain cache or calls `GET /v1/signing-keys/current` and caches the result
+- [x] Verifier fails closed: any error in verification aborts the install
+- [x] Write tests for signing and verification round-trip with a real bottle tarball fixture
+- [x] Write test that confirms verification fails with a tampered bottle
+- [x] Write test that confirms verification fails with a signature from a different key
 
 **Success Criteria:** A bottle can be signed using the development key pair and the signature can be verified by the verifier package. Tampered bottles and wrong-key signatures are rejected. The public key fetch and cache flow works correctly.
 
