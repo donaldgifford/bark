@@ -55,7 +55,7 @@ jobs:
         with:
           files: coverage.out
           token: ${{ secrets.CODECOV_TOKEN }}
-          slug: donaldgifford/
+          slug: donaldgifford/bark
         continue-on-error: true
 
   build:
