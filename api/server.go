@@ -12,6 +12,7 @@ import (
 
 	"github.com/donaldgifford/bark/api/handlers"
 	"github.com/donaldgifford/bark/api/middleware"
+	"github.com/donaldgifford/bark/api/s3"
 )
 
 const (
@@ -24,24 +25,30 @@ const (
 type Config struct {
 	// Addr is the address the server listens on (e.g. ":8080").
 	Addr string
-	// JWTConfig configures JWT validation middleware.
+	// JWTConfig configures JWT validation middleware for user requests.
 	JWTConfig middleware.AuthConfig
+	// PipelineToken is the bearer token expected from CI pipeline calls.
+	PipelineToken string
+	// PresignTTL is how long presigned S3 download URLs remain valid.
+	PresignTTL time.Duration
 }
 
 // Server is the bark API HTTP server.
 type Server struct {
 	cfg    Config
 	pool   *pgxpool.Pool
+	s3     *s3.Client
 	logger *slog.Logger
 	http   *http.Server
 }
 
 // New creates and configures a Server but does not start it.
 // Call ListenAndServe to start accepting connections.
-func New(cfg Config, pool *pgxpool.Pool, logger *slog.Logger) (*Server, error) {
+func New(cfg Config, pool *pgxpool.Pool, s3Client *s3.Client, logger *slog.Logger) (*Server, error) {
 	s := &Server{
 		cfg:    cfg,
 		pool:   pool,
+		s3:     s3Client,
 		logger: logger,
 	}
 
@@ -90,30 +97,39 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 
 // routes configures all routes and middleware and returns the root handler.
 func (s *Server) routes() (http.Handler, error) {
+	h := handlers.New(s.pool, s.s3, s.logger, s.cfg.PresignTTL)
+
 	mux := http.NewServeMux()
 
-	// Public routes (no auth).
+	// Public route (no auth).
 	mux.Handle("GET /healthz", handlers.Health(s.pool))
 
-	// Authenticated routes — wrapped below.
-	authed := http.NewServeMux()
-
-	// Wrap the authenticated mux with JWT middleware.
-	authMiddleware, err := middleware.JWTAuth(s.cfg.JWTConfig, s.logger)
+	// JWT-authenticated routes (user-facing).
+	authMW, err := middleware.JWTAuth(s.cfg.JWTConfig, s.logger)
 	if err != nil {
 		return nil, fmt.Errorf("initialize jwt auth: %w", err)
 	}
 
-	// Chain middleware: request ID → logger → auth (for protected routes).
-	chain := middleware.RequestID(
-		middleware.Logger(s.logger)(
-			authMiddleware(authed),
-		),
-	)
+	authed := http.NewServeMux()
+	authed.HandleFunc("GET /v1/packages", h.ListPackages)
+	authed.HandleFunc("GET /v1/packages/search", h.SearchPackages)
+	authed.HandleFunc("GET /v1/packages/{name}", h.ResolveLatest)
+	authed.HandleFunc("GET /v1/packages/{name}/{version}", h.ResolveVersion)
+	authed.HandleFunc("GET /v1/signing-keys/current", h.CurrentSigningKey)
 
-	// Mount authenticated routes under /v1/.
-	mux.Handle("/v1/", chain)
+	mux.Handle("/v1/packages", authMW(authed))
+	mux.Handle("/v1/packages/", authMW(authed))
+	mux.Handle("/v1/signing-keys/", authMW(authed))
 
-	// Apply global middleware (request ID + logger) to all routes including /healthz.
+	// Pipeline-authenticated routes (CI service token).
+	pipeline := http.NewServeMux()
+	pipeline.HandleFunc("POST /v1/packages/{name}/versions", h.RegisterVersion)
+	pipelineMW := middleware.PipelineAuth(s.cfg.PipelineToken)
+	mux.Handle("/v1/pipeline/", pipelineMW(pipeline))
+
+	// POST registration endpoint — pipeline token auth.
+	mux.Handle("POST /v1/packages/{name}/versions", pipelineMW(http.HandlerFunc(h.RegisterVersion)))
+
+	// Apply global middleware to all routes.
 	return middleware.RequestID(middleware.Logger(s.logger)(mux)), nil
 }

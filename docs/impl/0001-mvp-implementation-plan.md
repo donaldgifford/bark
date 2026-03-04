@@ -84,15 +84,15 @@ The API is the authority for all package state. Build the data layer and core se
 
 The minimum endpoints the CLI needs to function.
 
-- [ ] Implement `GET /v1/packages` — list all published packages with name, version, tier, description
-- [ ] Implement `GET /v1/packages/search?q=` — search by name prefix and description
-- [ ] Implement `GET /v1/packages/{name}` — resolve latest published version, return full manifest including bottle presigned URL
-- [ ] Implement `GET /v1/packages/{name}/{version}` — resolve specific version
-- [ ] Presigned URL TTL configurable via environment variable, default 5 minutes
-- [ ] Implement `POST /v1/packages/{name}/versions` — pipeline registration endpoint, accepts bottle S3 key, SHA256, cosign sig ref, SBOM S3 key, scan result references, tier; creates version record
-- [ ] Registration endpoint requires a pipeline service token (separate from user JWTs), validated via a shared secret or dedicated OIDC client
-- [ ] Implement `GET /v1/signing-keys/current` — returns the active public key for signature verification
-- [ ] Write unit tests for all handlers with table-driven test cases
+- [x] Implement `GET /v1/packages` — list all published packages with name, version, tier, description
+- [x] Implement `GET /v1/packages/search?q=` — search by name prefix and description
+- [x] Implement `GET /v1/packages/{name}` — resolve latest published version, return full manifest including bottle presigned URL
+- [x] Implement `GET /v1/packages/{name}/{version}` — resolve specific version
+- [x] Presigned URL TTL configurable via environment variable, default 5 minutes
+- [x] Implement `POST /v1/packages/{name}/versions` — pipeline registration endpoint, accepts bottle S3 key, SHA256, cosign sig ref, SBOM S3 key, scan result references, tier; creates version record
+- [x] Registration endpoint requires a pipeline service token (separate from user JWTs), validated via a shared secret or dedicated OIDC client
+- [x] Implement `GET /v1/signing-keys/current` — returns the active public key for signature verification
+- [x] Write unit tests for all handlers with table-driven test cases
 - [ ] Write integration tests for the full resolve flow: seed a version record, call resolve, verify presigned URL is valid and points to the correct S3 key
 
 **Success Criteria:** All endpoints return correct responses for happy path and error cases (not found, unauthorized, bad request). The registration endpoint correctly creates a version record and the resolve endpoint returns it with a valid presigned URL. Integration tests pass against LocalStack.

@@ -13,6 +13,7 @@ import (
 	bark "github.com/donaldgifford/bark/api"
 	"github.com/donaldgifford/bark/api/database"
 	"github.com/donaldgifford/bark/api/middleware"
+	"github.com/donaldgifford/bark/api/s3"
 )
 
 func main() {
@@ -49,7 +50,16 @@ func run(logger *slog.Logger) error {
 
 	presignTTL := getEnvDuration("BARK_PRESIGNED_URL_TTL_MINUTES", 5) * time.Minute
 
-	_ = presignTTL // Used in Phase 2 when S3 client is wired into handlers.
+	s3Client, err := s3.New(ctx, s3.Config{
+		Bucket:     getEnv("BARK_S3_BUCKET", "homebrew-bottles"),
+		Endpoint:   getEnv("BARK_S3_ENDPOINT", ""),
+		Region:     getEnv("AWS_REGION", "us-east-1"),
+		PresignTTL: presignTTL,
+	})
+	if err != nil {
+		return err
+	}
+	logger.Info("s3 client initialized")
 
 	svrCfg := bark.Config{
 		Addr: getEnv("BARK_API_ADDR", ":8080"),
@@ -57,9 +67,11 @@ func run(logger *slog.Logger) error {
 			JWKSURL:  getEnv("BARK_OIDC_JWKS_URL", ""),
 			Audience: getEnv("BARK_OIDC_AUDIENCE", "bark-api"),
 		},
+		PipelineToken: getEnv("BARK_PIPELINE_TOKEN", ""),
+		PresignTTL:    presignTTL,
 	}
 
-	svr, err := bark.New(svrCfg, pool, logger)
+	svr, err := bark.New(svrCfg, pool, s3Client, logger)
 	if err != nil {
 		return err
 	}
