@@ -3,7 +3,7 @@
 #
 # Triggered by PRs that touch formulas/internal/. For each changed formula,
 # this workflow downloads and validates the referenced bottle: generates an
-# SBOM, scans for CVEs (grype), checks licenses (scancode), signs the bottle
+# SBOM, scans for CVEs (grype), signs the bottle
 # with cosign, uploads artifacts to S3, and registers the version with the
 # bark API.
 #
@@ -52,9 +52,6 @@ jobs:
 
       - name: Install grype
         uses: anchore/scan-action/download-grype@v7
-
-      - name: Install scancode-toolkit
-        run: pip3 install scancode-toolkit
 
       - name: Install cosign
         run: brew install cosign

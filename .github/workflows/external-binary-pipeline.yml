@@ -6,7 +6,7 @@
 #   1. Downloads the binary from source_url
 #   2. Verifies SHA-256
 #   3. Generates an SBOM (syft) and scans for CVEs (grype)
-#   4. Runs license detection (scancode) — non-blocking
+#   4. Uploads bottle to S3 staging and registers a pending version
 #   5. Creates a pending version record via the bark API
 #   6. Posts a scan summary as a PR comment
 #
@@ -53,13 +53,6 @@ jobs:
 
       - name: Install grype
         uses: anchore/scan-action/download-grype@v7
-
-      - uses: actions/setup-python@v6
-        with:
-          python-version: '3.13'
-
-      - name: Install scancode-toolkit
-        run: pip3 install scancode-toolkit
 
       - name: Detect new request files
         id: changes
@@ -137,20 +130,14 @@ jobs:
               HIGH_COUNT=$(jq '[.matches[].vulnerability.severity | select(. == "High")] | length' "${GRYPE_PATH}" 2>/dev/null || echo 0)
             fi
 
-            # 5. Run license scan (non-blocking).
-            SCANCODE_PATH="${WORK_DIR}/scancode.json"
-            mkdir -p "${WORK_DIR}/extracted"
-            tar -xzf "${BOTTLE_PATH}" -C "${WORK_DIR}/extracted" 2>/dev/null || true
-            scancode --license --json-pp "${SCANCODE_PATH}" "${WORK_DIR}/extracted" 2>/dev/null || true
-
-            # 6. Upload bottle to staging S3 (held pending admin approval).
+            # 5. Upload bottle to staging S3 (held pending admin approval).
             STAGING_KEY="bottles/external-binary/${NAME}/${VERSION}/staging/${NAME}-${VERSION}.tar.gz"
             aws s3 cp "${BOTTLE_PATH}" "s3://${BARK_S3_BUCKET}/${STAGING_KEY}" \
               ${BARK_S3_ENDPOINT:+--endpoint-url "${BARK_S3_ENDPOINT}"}
 
             # 7. Upload scan artifacts to S3.
             SCAN_S3_PREFIX="scans/external-binary/${NAME}/${VERSION}"
-            for artifact in "${GRYPE_PATH}" "${SCANCODE_PATH}" "${SBOM_PATH}"; do
+            for artifact in "${GRYPE_PATH}" "${SBOM_PATH}"; do
               if [ -f "${artifact}" ]; then
                 KEY="${SCAN_S3_PREFIX}/$(basename "${artifact}")"
                 aws s3 cp "${artifact}" "s3://${BARK_S3_BUCKET}/${KEY}" \
@@ -167,8 +154,7 @@ jobs:
             "cosign_sig_ref": "",
             "sbom_s3_key": "${SCAN_S3_PREFIX}/sbom.cdx.json",
             "scan_results": [
-              {"scanner": "grype", "result_s3_key": "${SCAN_S3_PREFIX}/grype.json", "passed": $([ "${CRITICAL_COUNT}" = "0" ] && echo true || echo false)},
-              {"scanner": "scancode", "result_s3_key": "${SCAN_S3_PREFIX}/scancode.json", "passed": true}
+              {"scanner": "grype", "result_s3_key": "${SCAN_S3_PREFIX}/grype.json", "passed": $([ "${CRITICAL_COUNT}" = "0" ] && echo true || echo false)}
             ],
             "tier": "external-binary"
           }
@@ -190,8 +176,7 @@ jobs:
             "high_cves": ${HIGH_COUNT},
             "register_status": "${REGISTER_STATUS}",
             "scans": [
-              {"scanner": "grype", "passed": $([ "${CRITICAL_COUNT}" = "0" ] && echo true || echo false), "details": "critical=${CRITICAL_COUNT} high=${HIGH_COUNT}"},
-              {"scanner": "scancode", "passed": true, "details": "see S3 for license details"}
+              {"scanner": "grype", "passed": $([ "${CRITICAL_COUNT}" = "0" ] && echo true || echo false), "details": "critical=${CRITICAL_COUNT} high=${HIGH_COUNT}"}
             ]
           }
           JSON
