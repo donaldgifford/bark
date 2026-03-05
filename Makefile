@@ -36,7 +36,7 @@ COVERAGE_OUT := coverage.out
 ###############
 ##@ Infrastructure
 
-.PHONY: infra-up infra-down infra-seed
+.PHONY: infra-up infra-down infra-seed dev-keys
 
 infra-up: ## Start local infrastructure (LocalStack)
 	@ $(MAKE) --no-print-directory log-$@
@@ -52,6 +52,17 @@ infra-seed: ## Seed LocalStack with test fixture data
 	@ $(MAKE) --no-print-directory log-$@
 	@bash infra/scripts/init-localstack.sh
 	@echo "✓ LocalStack seeded"
+
+dev-keys: ## Generate cosign dev key pair in infra/keys/ (gitignored; required for signing tests)
+	@ $(MAKE) --no-print-directory log-$@
+	@mkdir -p infra/keys
+	@if [ -f infra/keys/cosign-dev.key ]; then \
+		echo "✓ Dev keys already exist (infra/keys/cosign-dev.{key,pub})"; \
+	else \
+		cd infra/keys && COSIGN_PASSWORD="" cosign generate-key-pair --output-key-prefix cosign-dev && \
+		echo "✓ Dev keys generated in infra/keys/"; \
+		echo "  Store in GitHub secrets with: make push-dev-keys"; \
+	fi
 
 ###############
 ##@ Go Development

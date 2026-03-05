@@ -2,83 +2,68 @@ package signing
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 )
 
+// requireSigningKey returns the path to the dev signing key and skips the
+// test if the file does not exist (keys are gitignored; run 'make dev-keys').
+func requireSigningKey(t *testing.T) string {
+	t.Helper()
+	p := filepath.Join("..", "..", "infra", "keys", "cosign-dev.key")
+	if _, err := os.Stat(p); os.IsNotExist(err) {
+		t.Skip("dev signing key not found; run 'make dev-keys' to generate: " + p)
+	}
+	return p
+}
+
 func TestSignBottle(t *testing.T) {
-	// Test data paths
-	keyPath := filepath.Join("..", "..", "infra", "keys", "cosign-dev.key")
+	keyPath := requireSigningKey(t)
 	bottlePath := filepath.Join("..", "..", "testdata", "test-bottle.tar.gz")
 
-	// Test the convenience function
 	sig, err := SignBottle(bottlePath, keyPath)
 	if err != nil {
 		t.Fatalf("SignBottle failed: %v", err)
 	}
-
-	if sig == "" {
-		t.Fatal("SignBottle returned empty signature")
-	}
-
-	// Base64 signatures should be reasonably long
 	if len(sig) < 50 {
 		t.Fatalf("Signature too short: got %d characters", len(sig))
 	}
-
 	t.Logf("Generated signature: %s", sig[:50]+"...")
 }
 
 func TestSignSBOM(t *testing.T) {
-	// Test data paths
-	keyPath := filepath.Join("..", "..", "infra", "keys", "cosign-dev.key")
-	sbomPath := filepath.Join("..", "..", "testdata", "test-package.txt") // Use text file as SBOM fixture
+	keyPath := requireSigningKey(t)
+	sbomPath := filepath.Join("..", "..", "testdata", "test-package.txt")
 
-	// Test the convenience function
 	sig, err := SignSBOM(sbomPath, keyPath)
 	if err != nil {
 		t.Fatalf("SignSBOM failed: %v", err)
 	}
-
-	if sig == "" {
-		t.Fatal("SignSBOM returned empty signature")
-	}
-
-	// Base64 signatures should be reasonably long
 	if len(sig) < 50 {
 		t.Fatalf("Signature too short: got %d characters", len(sig))
 	}
-
 	t.Logf("Generated SBOM signature: %s", sig[:50]+"...")
 }
 
 func TestSignerRoundTrip(t *testing.T) {
-	// Test data paths
-	keyPath := filepath.Join("..", "..", "infra", "keys", "cosign-dev.key")
+	keyPath := requireSigningKey(t)
 	bottlePath := filepath.Join("..", "..", "testdata", "test-bottle.tar.gz")
 
-	// Create signer
 	signer := NewSigner(keyPath)
-
-	// Sign the bottle
 	ctx := context.Background()
+
 	sig, err := signer.SignBottle(ctx, bottlePath)
 	if err != nil {
 		t.Fatalf("SignBottle failed: %v", err)
 	}
-
-	// Verify we get consistent signatures for the same file
 	sig2, err := signer.SignBottle(ctx, bottlePath)
 	if err != nil {
 		t.Fatalf("Second SignBottle failed: %v", err)
 	}
-
-	// Cosign signatures are not deterministic due to ECDSA randomness,
-	// so we just verify both are valid non-empty strings.
 	if sig == "" || sig2 == "" {
 		t.Fatal("One of the signatures is empty")
 	}
-
 	t.Logf("First signature:  %s", sig[:50]+"...")
 	t.Logf("Second signature: %s", sig2[:50]+"...")
 }
@@ -89,6 +74,7 @@ func TestSignerErrors(t *testing.T) {
 		keyPath     string
 		filePath    string
 		expectError string
+		needsDevKey bool
 	}{
 		{
 			name:        "nonexistent key",
@@ -98,20 +84,24 @@ func TestSignerErrors(t *testing.T) {
 		},
 		{
 			name:        "nonexistent file",
-			keyPath:     filepath.Join("..", "..", "infra", "keys", "cosign-dev.key"),
+			keyPath:     "", // filled in below if dev key present
 			filePath:    "/nonexistent/file.tar.gz",
 			expectError: "failed to read file to sign",
+			needsDevKey: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			signer := NewSigner(tt.keyPath)
+			keyPath := tt.keyPath
+			if tt.needsDevKey {
+				keyPath = requireSigningKey(t)
+			}
+			signer := NewSigner(keyPath)
 			_, err := signer.SignBottle(context.Background(), tt.filePath)
 			if err == nil {
 				t.Fatal("Expected error but got none")
 			}
-
 			if tt.expectError != "" && !contains(err.Error(), tt.expectError) {
 				t.Fatalf("Expected error containing %q, got: %v", tt.expectError, err)
 			}

@@ -10,57 +10,56 @@ import (
 	"github.com/donaldgifford/bark/pipeline/signing"
 )
 
+// devKeyPath returns the path to a file in infra/keys/ and skips the test if
+// the file does not exist (keys are gitignored; run 'make dev-keys').
+func devKeyPath(t *testing.T, name string) string {
+	t.Helper()
+	p := filepath.Join("..", "infra", "keys", name)
+	if _, err := os.Stat(p); os.IsNotExist(err) {
+		t.Skip("dev key not found; run 'make dev-keys' to generate: " + p)
+	}
+	return p
+}
+
+// readDevKey reads a key file from infra/keys/ and skips the test if missing.
+func readDevKey(t *testing.T, name string) string {
+	t.Helper()
+	path := devKeyPath(t, name)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read dev key %s: %v", name, err)
+	}
+	return string(data)
+}
+
 // TestSigningVerificationRoundTrip demonstrates the complete signing and verification flow.
 func TestSigningVerificationRoundTrip(t *testing.T) {
-	// Test data paths
-	keyPath := filepath.Join("..", "infra", "keys", "cosign-dev.key")
-	pubKeyPath := filepath.Join("..", "infra", "keys", "cosign-dev.pub")
+	keyPath := devKeyPath(t, "cosign-dev.key")
+	pubKey := readDevKey(t, "cosign-dev.pub")
 	testFilePath := filepath.Join("..", "testdata", "test-bottle.tar.gz")
 
-	// Ensure test file exists
-	if _, err := os.Stat(testFilePath); os.IsNotExist(err) {
-		t.Fatalf("Test file does not exist: %s", testFilePath)
-	}
-
-	// Read the public key
-	pubKeyBytes, err := os.ReadFile(pubKeyPath)
-	if err != nil {
-		t.Fatalf("Failed to read public key: %v", err)
-	}
-	pubKey := string(pubKeyBytes)
-
-	// Step 1: Sign the file using the pipeline signing package
 	signer := signing.NewSigner(keyPath)
 	sig, err := signer.SignBottle(context.Background(), testFilePath)
 	if err != nil {
 		t.Fatalf("Failed to sign bottle: %v", err)
 	}
-
 	t.Logf("Generated signature: %s...", sig[:50])
 
-	// Step 2: Verify the signature using the CLI verifier package
-	verifierInstance := verifier.NewVerifier(verifier.Config{})
-	err = verifierInstance.Verify(context.Background(), testFilePath, sig, pubKey)
-	if err != nil {
+	v := verifier.NewVerifier(verifier.Config{})
+	if err := v.Verify(context.Background(), testFilePath, sig, pubKey); err != nil {
 		t.Fatalf("Failed to verify signature: %v", err)
 	}
-
 	t.Log("Round-trip signing and verification successful!")
 
-	// Step 3: Test convenience functions
 	sig2, err := signing.SignBottle(testFilePath, keyPath)
 	if err != nil {
 		t.Fatalf("Failed to sign with convenience function: %v", err)
 	}
-
-	err = verifier.Verify(testFilePath, sig2, pubKey)
-	if err != nil {
+	if err := verifier.Verify(testFilePath, sig2, pubKey); err != nil {
 		t.Fatalf("Failed to verify with convenience function: %v", err)
 	}
-
 	t.Log("Convenience functions work correctly!")
 
-	// Step 4: Verify signatures are valid but non-deterministic (due to ECDSA randomness)
 	if sig == sig2 {
 		t.Log("Note: Signatures are identical (unexpected but not an error)")
 	} else {
@@ -70,31 +69,19 @@ func TestSigningVerificationRoundTrip(t *testing.T) {
 
 // TestSigningSBOMRoundTrip tests SBOM signing and verification.
 func TestSigningSBOMRoundTrip(t *testing.T) {
-	// Test data paths
-	keyPath := filepath.Join("..", "infra", "keys", "cosign-dev.key")
-	pubKeyPath := filepath.Join("..", "infra", "keys", "cosign-dev.pub")
-	sbomPath := filepath.Join("..", "testdata", "test-package.txt") // Using text file as SBOM fixture
+	keyPath := devKeyPath(t, "cosign-dev.key")
+	pubKey := readDevKey(t, "cosign-dev.pub")
+	sbomPath := filepath.Join("..", "testdata", "test-package.txt")
 
-	// Read the public key
-	pubKeyBytes, err := os.ReadFile(pubKeyPath)
-	if err != nil {
-		t.Fatalf("Failed to read public key: %v", err)
-	}
-	pubKey := string(pubKeyBytes)
-
-	// Sign the SBOM
 	signer := signing.NewSigner(keyPath)
 	sig, err := signer.SignSBOM(context.Background(), sbomPath)
 	if err != nil {
 		t.Fatalf("Failed to sign SBOM: %v", err)
 	}
 
-	// Verify the SBOM signature
-	verifierInstance := verifier.NewVerifier(verifier.Config{})
-	err = verifierInstance.Verify(context.Background(), sbomPath, sig, pubKey)
-	if err != nil {
+	v := verifier.NewVerifier(verifier.Config{})
+	if err := v.Verify(context.Background(), sbomPath, sig, pubKey); err != nil {
 		t.Fatalf("Failed to verify SBOM signature: %v", err)
 	}
-
 	t.Log("SBOM signing and verification successful!")
 }
