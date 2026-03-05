@@ -48,10 +48,14 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Install scan tools
-        run: |
-          brew install syft grype
-          pip3 install scancode-toolkit
+      - name: Install syft
+        uses: anchore/sbom-action/download-syft@v0
+
+      - name: Install grype
+        uses: anchore/scan-action/download-grype@v0
+
+      - name: Install scancode-toolkit
+        run: pip3 install scancode-toolkit
 
       - name: Detect new request files
         id: changes

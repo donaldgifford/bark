@@ -48,10 +48,10 @@ jobs:
           cache: true
 
       - name: Install syft
-        run: brew install syft
+        uses: anchore/sbom-action/download-syft@v0
 
       - name: Install grype
-        run: brew install grype
+        uses: anchore/scan-action/download-grype@v0
 
       - name: Install scancode-toolkit
         run: pip3 install scancode-toolkit
