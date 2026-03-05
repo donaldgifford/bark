@@ -51,7 +51,7 @@ jobs:
         uses: anchore/sbom-action/download-syft@v0
 
       - name: Install grype
-        uses: anchore/scan-action/download-grype@v0
+        uses: anchore/scan-action/download-grype@v7
 
       - name: Install scancode-toolkit
         run: pip3 install scancode-toolkit
