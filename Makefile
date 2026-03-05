@@ -1,10 +1,10 @@
-# bark - A custom wiz cli
+# bark — self-hosted internal package manager
 
 ## Project Variables
 
 PROJECT_NAME  := bark
 PROJECT_OWNER := donaldgifford
-DESCRIPTION   := A custom wiz cli
+DESCRIPTION   := Self-hosted internal package manager for macOS developer fleets
 PROJECT_URL   := https://github.com/$(PROJECT_OWNER)/$(PROJECT_NAME)
 
 ## Go Variables
@@ -32,6 +32,36 @@ CUR_VERSION ?= $(shell git describe --tags --exact-match 2>/dev/null || git desc
 COVERAGE_OUT := coverage.out
 
 
+###############
+##@ Infrastructure
+
+.PHONY: infra-up infra-down infra-seed dev-keys
+
+infra-up: ## Start local infrastructure (LocalStack)
+	@ $(MAKE) --no-print-directory log-$@
+	@docker compose up -d
+	@echo "✓ LocalStack running on http://localhost:4566"
+
+infra-down: ## Stop local infrastructure
+	@ $(MAKE) --no-print-directory log-$@
+	@docker compose down
+	@echo "✓ LocalStack stopped"
+
+infra-seed: ## Seed LocalStack with test fixture data
+	@ $(MAKE) --no-print-directory log-$@
+	@bash infra/scripts/init-localstack.sh
+	@echo "✓ LocalStack seeded"
+
+dev-keys: ## Generate cosign dev key pair in infra/keys/ (gitignored; required for signing tests)
+	@ $(MAKE) --no-print-directory log-$@
+	@mkdir -p infra/keys
+	@if [ -f infra/keys/cosign-dev.key ]; then \
+		echo "✓ Dev keys already exist (infra/keys/cosign-dev.{key,pub})"; \
+	else \
+		cd infra/keys && COSIGN_PASSWORD="" cosign generate-key-pair --output-key-prefix cosign-dev && \
+		echo "✓ Dev keys generated in infra/keys/"; \
+		echo "  Store in GitHub secrets with: make push-dev-keys"; \
+	fi
 
 ###############
 ##@ Go Development
@@ -44,7 +74,7 @@ COVERAGE_OUT := coverage.out
 
 ## Build Targets
 
-build: build-core ## Build everything (core)
+build: build-core ## Build everything (core binary + CLI)
 
 build-core: ## Build core binary
 	@ $(MAKE) --no-print-directory log-$@
@@ -99,11 +129,17 @@ clean: ## Remove build artifacts
 
 ## Application Services
 
-run: ## Run CLI command
+api-dev: ## Run API server with local config (requires infra-up)
 	@ $(MAKE) --no-print-directory log-$@
-	./build/bin/repo-guardian
+	@go run ./api/...
 
-run-local: build ## Run exporter with local config
+cli-build: ## Build the pkgtool CLI binary
+	@ $(MAKE) --no-print-directory log-$@
+	@mkdir -p $(BIN_DIR)
+	@go build -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT_HASH)" -o $(BIN_DIR)/pkgtool ./cli/...
+	@echo "✓ pkgtool built at $(BIN_DIR)/pkgtool"
+
+run-local: build ## Run core binary with local config
 	@ $(MAKE) --no-print-directory log-$@
 	@$(BIN_DIR)/$(PROJECT_NAME)
 

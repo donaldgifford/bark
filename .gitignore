@@ -36,3 +36,9 @@ build/
 
 # Archive
 archive/
+
+# Cosign / signing keys — never commit key material to the repo.
+# Generate keys locally and store them in GitHub Actions secrets.
+# See infra/keys/README.md for setup instructions.
+infra/keys/*.key
+infra/keys/*.pub

@@ -1,0 +1,133 @@
+---
+# Post-Approval Pipeline
+#
+# Triggered manually (or via repository_dispatch) after an admin approves an
+# external-binary package via:
+#   POST /v1/packages/{name}/versions/{version}/approve
+#
+# This workflow completes the sign-upload-publish sequence:
+#   1. Downloads the bottle from its staging S3 location
+#   2. Signs the bottle with cosign using the repository's signing key
+#   3. Uploads the signed bottle to its final published S3 location
+#   4. Calls POST /v1/packages/{name}/versions/{version}/publish with the
+#      final S3 key and cosign signature reference
+#
+# After this workflow completes the package becomes installable:
+#   pkgtool install {name}@{version}
+#
+# Required repository secrets:
+#   BARK_API_BASE_URL, BARK_API_TOKEN, BARK_S3_BUCKET,
+#   BARK_S3_ENDPOINT, BARK_S3_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY,
+#   COSIGN_PRIVATE_KEY, COSIGN_PASSWORD
+
+name: Post-Approval Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      package_name:
+        description: Package name (e.g. mytool)
+        required: true
+        type: string
+      package_version:
+        description: Package version (e.g. 1.2.3)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Sign and Publish External Binary
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Download bottle from staging S3
+        env:
+          BARK_S3_BUCKET: ${{ secrets.BARK_S3_BUCKET }}
+          BARK_S3_ENDPOINT: ${{ secrets.BARK_S3_ENDPOINT }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.BARK_S3_REGION }}
+        run: |
+          NAME="${{ inputs.package_name }}"
+          VERSION="${{ inputs.package_version }}"
+          STAGING_KEY="bottles/external-binary/${NAME}/${VERSION}/staging/${NAME}-${VERSION}.tar.gz"
+          BOTTLE_PATH="/tmp/${NAME}-${VERSION}.tar.gz"
+
+          echo "Downloading staging bottle: ${STAGING_KEY}"
+          aws s3 cp "s3://${BARK_S3_BUCKET}/${STAGING_KEY}" "${BOTTLE_PATH}" \
+            ${BARK_S3_ENDPOINT:+--endpoint-url "${BARK_S3_ENDPOINT}"}
+
+          echo "bottle_path=${BOTTLE_PATH}" >> "$GITHUB_ENV"
+          echo "staging_key=${STAGING_KEY}" >> "$GITHUB_ENV"
+          echo "name=${NAME}" >> "$GITHUB_ENV"
+          echo "version=${VERSION}" >> "$GITHUB_ENV"
+
+      - name: Sign bottle with cosign
+        env:
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: |
+          # Write the private key to a temp file.
+          KEY_FILE="$(mktemp)"
+          echo "${{ secrets.COSIGN_PRIVATE_KEY }}" > "${KEY_FILE}"
+          trap 'rm -f "${KEY_FILE}"' EXIT
+
+          # Sign and capture the base64 signature.
+          SIG_B64=$(cosign sign-blob \
+            --key "${KEY_FILE}" \
+            --output-signature /dev/stdout \
+            "${bottle_path}" | base64 -w0)
+
+          echo "cosign_sig_ref=${SIG_B64}" >> "$GITHUB_ENV"
+
+      - name: Upload signed bottle to final S3 location
+        env:
+          BARK_S3_BUCKET: ${{ secrets.BARK_S3_BUCKET }}
+          BARK_S3_ENDPOINT: ${{ secrets.BARK_S3_ENDPOINT }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.BARK_S3_REGION }}
+        run: |
+          FINAL_KEY="bottles/external-binary/${name}/${version}/${name}-${version}.arm64_sonoma.bottle.tar.gz"
+
+          echo "Uploading to final key: ${FINAL_KEY}"
+          aws s3 cp "${bottle_path}" "s3://${BARK_S3_BUCKET}/${FINAL_KEY}" \
+            ${BARK_S3_ENDPOINT:+--endpoint-url "${BARK_S3_ENDPOINT}"}
+
+          echo "final_key=${FINAL_KEY}" >> "$GITHUB_ENV"
+
+      - name: Publish version via bark API
+        env:
+          BARK_API_BASE_URL: ${{ secrets.BARK_API_BASE_URL }}
+          BARK_API_TOKEN: ${{ secrets.BARK_API_TOKEN }}
+        run: |
+          PUBLISH_PAYLOAD=$(cat <<PAYLOAD
+          {
+            "bottle_s3_key": "${final_key}",
+            "cosign_sig_ref": "${cosign_sig_ref}"
+          }
+          PAYLOAD
+          )
+
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST "${BARK_API_BASE_URL}/v1/packages/${name}/versions/${version}/publish" \
+            -H "Authorization: Bearer ${BARK_API_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "${PUBLISH_PAYLOAD}")
+
+          echo "Publish API status: ${STATUS}"
+          if [ "${STATUS}" != "200" ]; then
+            echo "::error::Publish API returned HTTP ${STATUS} for ${name}@${version}"
+            exit 1
+          fi
+
+          echo "::notice::${name}@${version} is now published and installable."
+          echo "  pkgtool install ${name}@${version}"
