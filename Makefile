@@ -32,7 +32,6 @@ CUR_VERSION ?= $(shell git describe --tags --exact-match 2>/dev/null || git desc
 COVERAGE_OUT := coverage.out
 
 
-
 ###############
 ##@ Infrastructure
 
